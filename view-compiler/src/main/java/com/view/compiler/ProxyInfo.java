@@ -1,8 +1,12 @@
 package com.view.compiler;
 
-import java.util.HashMap;
-import java.util.Map;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
@@ -26,8 +30,11 @@ public class ProxyInfo {
      */
     private TypeElement typeElement;
 
-    private StringBuilder findBuilder = new StringBuilder();
+    //key为id，value为对应的成员变量
+    public Map<Integer, VariableElement> finderElement = new HashMap<>();
+    public Set<Integer> clickElement = new HashSet<>();
 
+    private StringBuilder listenerBuilder = new StringBuilder();
     /**
      * 代理类类名后半部分
      */
@@ -61,17 +68,25 @@ public class ProxyInfo {
      * @param viewId          控件的ID
      * @param variableElement 在类中定义的属性元素
      */
-    void put(Integer viewId, VariableElement variableElement) {
-        /*
-          * TextView tv
-          */
-        // 获取属性名称
-        String name = variableElement.getSimpleName().toString();
-        // 获取属性的类型
-        String type = variableElement.asType().toString();
-        findBuilder.append("host.").append(name).append(" = ")
-                .append("(").append(type).append(")(((android.app.Activity)source).findViewById(").append(viewId)
-                .append("));\n");
+    void putFliedElem(Integer viewId, VariableElement variableElement) {
+        finderElement.put(viewId, variableElement);
+    }
+
+    public void putMethodElem(int[] value, ExecutableElement element) {
+        if (value != null && value.length != 0) {
+            for (int id : value) {
+                clickElement.add(id);
+            }
+            String simpleName = element.getSimpleName().toString();
+            if (listenerBuilder.length() == 0) {
+                listenerBuilder.append("   android.view.View.OnClickListener listener= new android.view.View.OnClickListener() {\n")
+                        .append("       @Override\n")
+                        .append("       public void onClick(android.view.View view) {\n")
+                        .append("           host.").append(simpleName).append("(view);\n")
+                        .append("       }\n")
+                        .append("   };\n");
+            }
+        }
     }
 
     /**
@@ -90,7 +105,6 @@ public class ProxyInfo {
                 .append("public class ").append(proxyClassName).append(" implements ").append(ProxyInfo.PROXY).append
                 ("<").append(typeElement.getQualifiedName()).append(">")
                 .append("{\n");
-
         generateMethods(builder);
         builder.append("\n");
         builder.append("}\n");
@@ -105,18 +119,43 @@ public class ProxyInfo {
      */
     private void generateMethods(StringBuilder builder) {
         builder.append("@Override\n");
-        builder.append("public void inject(").append(typeElement.getQualifiedName()).append(" host, Object source ) {" +
-                " \n");
+        builder.append("public void inject(").append("final ").append(typeElement.getQualifiedName()).append(" host, Object source ) {" + " \n")
+                .append(listenerBuilder);
         //拼接if
         builder.append("  if (source instanceof android.app.Activity){\n");
         //拼接方法中的内容
-        builder.append(findBuilder);
+        getFinderStr(builder, "android.app.Activity");
+        getMethodStr(builder, "android.app.Activity");
         //else
-        builder.append("} else {\n");
+        builder.append("    } else {\n");
         //拼接方法中的内容
-        builder.append(findBuilder);
+        getFinderStr(builder, "android.view.View");
+        getMethodStr(builder, "android.view.View");
         //拼接方法结尾}
         builder.append("}\n");
         builder.append("    }\n");
     }
+
+    private void getFinderStr(StringBuilder builder, String clazzType) {
+        Set<Integer> keySet = finderElement.keySet();
+        for (Integer viewId : keySet) {
+            VariableElement variableElement = finderElement.get(viewId);
+            // 获取属性名称
+            String name = variableElement.getSimpleName().toString();
+            // 获取属性的类型
+            String type = variableElement.asType().toString();
+            builder.append("        host.").append(name).append(" = ")
+                    .append("(").append(type).append(")((").append(clazzType).append(")source).findViewById(").append(viewId)
+                    .append(");\n");
+        }
+
+    }
+
+    private void getMethodStr(StringBuilder builder, String clazzType) {
+        for (Integer viewId : clickElement) {
+            builder.append("       ((").append(clazzType).append(")source).findViewById(").append(viewId)
+                    .append(").setOnClickListener(").append("listener").append(");\n");
+        }
+    }
+
 }
